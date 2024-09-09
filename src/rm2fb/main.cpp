@@ -24,28 +24,31 @@ constexpr float to_float(uint16_t c)
          + (c         & 31) * (0.07 / 31); // blue
 }
 
-void do_update(Waved::Generator& generator, const swtfb::swtfb_update& s)
-{
-    auto mxcfb_update = s.mdata.update;
-    auto rect = mxcfb_update.update_region;
-    std::vector<Waved::Intensity> buffer(rect.width * rect.height);
+void do_update(
+    Waved::Generator& generator,
+    std::uint32_t left,
+    std::uint32_t top,
+    std::uint32_t width,
+    std::uint32_t height,
+    Waved::ModeID mode,
+    bool full_update
+) {
+    std::vector<Waved::Intensity> buffer(width * height);
 
 #ifdef DEBUG_DIRTY
     std::cerr << "HANDLING UPDATE\n";
-    std::cerr << "Dirty Region: " << rect.left << " " << rect.top << " "
-              << rect.width << " " << rect.height << '\n';
+    std::cerr << "Dirty Region: " << left << " " << top << " "
+              << width << " " << height << '\n';
 #endif
 
     // TODO: verify that the rectangle is within SHARED_MEM's bounds, otherwise the server will crash
-    for (unsigned int i = 0; i < rect.height; i++) {
-        for (unsigned int j = 0; j < rect.width; j++) {
+    for (unsigned int i = 0; i < height; i++) {
+        for (unsigned int j = 0; j < width; j++) {
             // intensity is from 0 - 30, evens only
-            buffer[j + i*rect.width] = uint8_t(to_float(SHARED_MEM[j+rect.left + (i+rect.top)*WIDTH]) * 15) * 2;
+            buffer[j + i*width] = uint8_t(to_float(SHARED_MEM[j+left + (i+top)*WIDTH]) * 15) * 2;
         }
     }
 
-    Waved::ModeID mode = mxcfb_update.waveform_mode;
-    bool full_update = mxcfb_update.update_mode;
     bool immediate = false;
 
     if (mode == /* fast */ 1 && !full_update) {
@@ -53,10 +56,10 @@ void do_update(Waved::Generator& generator, const swtfb::swtfb_update& s)
     }
 
     Waved::UpdateRegion region;
-    region.top = rect.top;
-    region.left = rect.left;
-    region.width = rect.width;
-    region.height = rect.height;
+    region.top = top;
+    region.left = left;
+    region.width = width;
+    region.height = height;
 
     generator.push_update(mode, immediate, region, buffer);
 }
@@ -131,17 +134,32 @@ int main(int argc, const char** argv)
     while (true) {
         auto buf = MSGQ.recv();
         switch (buf.mtype) {
-        case swtfb::ipc::UPDATE_t:
-            do_update(generator, buf);
+        case swtfb::ipc::UPDATE_t:{
+            auto rect = buf.mdata.update.update_region;
+            do_update(
+                generator,
+                rect.left,
+                rect.top,
+                rect.width,
+                rect.height,
+                buf.mdata.update.waveform_mode,
+                buf.mdata.update.update_mode
+            );
             break;
-
-        case swtfb::ipc::XO_t:
-            // XO_t means that buf.xochitl_update is filled in and needs to
-            // be forwarded to xochitl or translated to a compatible format
-            // with waved server
-            std::cerr << "(Unhandled XO_t message)\n";
+        }
+        case swtfb::ipc::XO_t:{
+            auto xdata = buf.mdata.xochitl_update;
+            do_update(
+                generator,
+                xdata.x1,
+                xdata.y1,
+                xdata.x2 - xdata.x1,
+                xdata.y2 - xdata.y1,
+                xdata.waveform,
+                xdata.flags
+            );
             break;
-
+        }
         case swtfb::ipc::WAIT_t:
             std::cerr << "(Unhandled wait message)\n";
             // TODO
