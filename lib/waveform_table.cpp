@@ -760,17 +760,9 @@ auto decode_fpl_number(const std::string& barcode) -> std::int16_t
 
 } // anonymous namespace
 
-auto WaveformTable::discover_wbf_file() -> std::optional<std::string>
+auto scan_wbf_dir(const std::string& path, std::int16_t fpl_lot) -> std::optional<std::string>
 {
-    auto metadata = read_metadata();
-
-    if (metadata.size() < 4) {
-        return {};
-    }
-
-    auto fpl_lot = decode_fpl_number(metadata[3]);
-
-    for (const auto& entry : fs::directory_iterator{"/usr/share/remarkable"}) {
+    for (const auto& entry : fs::directory_iterator{path}) {
         if (entry.path().extension().native() != ".wbf") {
             continue;
         }
@@ -794,8 +786,27 @@ auto WaveformTable::discover_wbf_file() -> std::optional<std::string>
             continue;
         }
     }
-
     return {};
+}
+
+auto WaveformTable::discover_wbf_file() -> std::optional<std::string>
+{
+    auto metadata = read_metadata();
+
+    if (metadata.size() < 4) {
+        std::cerr << "Invalid metadata" << std::endl;
+        return {};
+    }
+
+    auto fpl_lot = decode_fpl_number(metadata[3]);
+
+    std::cerr << std::to_string(fpl_lot) << std::endl;
+
+    auto path = scan_wbf_dir("/var/lib/uboot", fpl_lot);
+    if (!path) {
+        path = scan_wbf_dir("/usr/share/remarkable", fpl_lot);
+    }
+    return path;
 }
 
 } // namespace Waved
